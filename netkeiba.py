@@ -1,26 +1,54 @@
+import argparse
 import os
+import requests
 import time
 
+from bs4 import BeautifulSoup as BS
 import pandas as pd
+from requests.sessions import session
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 
 
-class NetkeibaScraper:
-    def __init__(self):
-        self.search_detail_URL =\
-            'https://db.netkeiba.com/?pid=race_search_detail'
+class Netkeiba:
+    def __init__(self, login_id=None, password=None):
+        login_url = 'https://regist.netkeiba.com/account/?pid=login'
 
-    def scrape_valid_urls(self, period):
+        self.session = requests.session()
+
+        if login_id is not None and login_id is not None:
+            login_info = {
+                'pid' : 'login',
+                'action' : 'auth',
+                'return_url2' : '',
+                'mem_tp' : '',
+                'login_id' : login_id,
+                'pswd' : password,
+            }
+            self.ses = self.session.post(login_url, data=login_info)
+        else:
+            print('netkeibaのアカウントを入力してください')
+            exit()
+        time.sleep(1)
+
+    def get_valid_urls(
+        self,
+        start_year=2020,
+        start_mon=1,
+        end_year=2020,
+        end_mon=12):
 
         options = Options()
         options.add_argument('--headless')
         driver = webdriver.Chrome(chrome_options=options)
         wait = WebDriverWait(driver, 10)
 
-        driver.get(self.search_detail_URL)
+        search_detail_URL =\
+            'https://db.netkeiba.com/?pid=race_search_detail'
+
+        driver.get(search_detail_URL)
         wait.until(EC.presence_of_all_elements_located)
 
         # 芝, ダートを選択
@@ -32,16 +60,16 @@ class NetkeibaScraper:
         # 期間を選択
         start_year_element = driver.find_element_by_name('start_year')
         start_year_select = Select(start_year_element)
-        start_year_select.select_by_value(str(period['start_year']))
+        start_year_select.select_by_value(str(start_year))
         start_mon_element = driver.find_element_by_name('start_mon')
         start_mon_select = Select(start_mon_element)
-        start_mon_select.select_by_value(str(period['end_mon']))
+        start_mon_select.select_by_value(str(start_mon))
         end_year_element = driver.find_element_by_name('end_year')
         end_year_select = Select(end_year_element)
-        end_year_select.select_by_value(str(period['end_year']))
+        end_year_select.select_by_value(str(end_year))
         end_mon_element = driver.find_element_by_name('end_mon')
         end_mon_select = Select(end_mon_element)
-        end_mon_select.select_by_value(str(period['end_mon']))
+        end_mon_select.select_by_value(str(end_mon))
 
         # 中央競馬場を指定
         # やらないと地方や海外が混ざる
@@ -84,18 +112,45 @@ class NetkeibaScraper:
             except IndexError:
                 break
 
-        pd.DataFrame(urls).to_csv(f'{save_dir}/{filename}')
+        urls = pd.DataFrame(urls)
+        urls.columns = ['URL']
+        urls.to_csv(f'{save_dir}/{filename}')
+
+        driver.close()
+
+
+    def scrape_race(self, url):
+        
+        self.ses = self.session.get(url)
+        self.ses.encoding = 'EUC-JP'
+        # bs = BS(ses.text, 'html.parser')
+        filename = "test.html"
+        with open(filename, 'w', encoding='EUC-JP') as f:
+            f.write(self.ses.text)
 
 
 if __name__ == '__main__':
 
-    NS = NetkeibaScraper()
+    parser = argparse.ArgumentParser(description='''
+    netkeibaから競馬情報を取得するコード
+    ''')
+    parser.add_argument('-url', '--get_url', type=bool, default=False, )
+    parser.add_argument('-i', '--login_id', type=str, default=None, help='メールアドレス')
+    parser.add_argument('-p', '--password', type=str, default=None, help='ログインパスワード')
+    args = parser.parse_args()
 
-    period = {
-        'start_year': 2015,
-        'start_mon': 1,
-        'end_year': 2021,
-        'end_mon': 11,
-    }
+    NS = Netkeiba(args.login_id, args.password)
 
-    NS.scrape_valid_urls(period)
+    if args.get_url:
+        period = {
+            'start_year': 2015,
+            'start_mon': 1,
+            'end_year': 2021,
+            'end_mon': 11,
+        }
+
+        NS.get_valid_urls(*period.values())
+
+    test_url = 'https://db.netkeiba.com/race/202105050812/'
+    NS.scrape_race(test_url)
+
